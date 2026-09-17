@@ -1,0 +1,123 @@
+# Helm values for an Ellf cluster on an existing Kubernetes cluster with an
+# external PostgreSQL, an existing ReadWriteMany PVC, Traefik as ingress and
+# a TLS certificate you provide.
+#
+# Replace every FILL-IN. Values marked "from cluster-creds.json" come from
+# cluster registration (see docs/installation.md, "Credentials from
+# Explosion"). Keep this file out of version control, or move the `secrets`
+# block into a second values file with restricted access.
+
+registries:
+  upstream: FILL-IN            # from cluster-creds.json: upstream_registry
+  user: ""                     # writable registry for custom recipe images;
+                               # leave empty to disable publishing
+
+image:
+  # First install only: set both to the target_*_version values in
+  # cluster-creds.json. Remove (or leave empty) on later upgrades so the
+  # chart keeps the versions the sidecar has rolled the cluster to.
+  brokerVersion: ""
+  cplVersion: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: explosion-registry
+
+# Workload Identity / IRSA annotations, only if registries.user is a GCP
+# Artifact Registry or AWS ECR repository the broker should push to.
+serviceAccount:
+  annotations: {}
+  # iam.gke.io/gcp-service-account: ellf@my-project.iam.gserviceaccount.com
+  # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/ellf-broker
+
+cluster:
+  clusterId: FILL-IN           # from cluster-creds.json: cluster_id
+  fqdn: ellf.example.com       # bare hostname, no scheme
+  scheme: https
+  pamFqdn: app.ellf.ai         # confirm with your Explosion contact
+
+ingress:
+  className: traefik
+  tls:
+    secretName: ellf-tls       # kubernetes.io/tls Secret in this namespace
+
+# Let's Encrypt via cert-manager instead of your own certificate:
+# certManager:
+#   clusterIssuerName: ellf-letsencrypt
+#   acmeEmail: ops@example.com
+certManager: null
+
+database:
+  ip: FILL-IN                  # IP or DNS name of PostgreSQL
+  user: ellf
+  name: ellf
+  egressCidr: ""               # required when ip is a DNS name, e.g. 10.20.0.0/16
+
+nfs:
+  claimName: prodigy-nfs       # existing ReadWriteMany PVC in this namespace
+
+# The platform pods schedule on nodes labelled ellf/role=system and tolerate
+# the matching taint. Change these if your system pool uses other labels.
+broker:
+  nodeSelector:
+    ellf/role: system
+  tolerations:
+    - key: ellf/role
+      operator: Equal
+      value: system
+      effect: NoSchedule
+preview:
+  nodeSelector:
+    ellf/role: system
+  tolerations:
+    - key: ellf/role
+      operator: Equal
+      value: system
+      effect: NoSchedule
+
+# One entry per worker node pool. node_class must match the pool's
+# ellf/node-class label. per_job sets default requests (cores, memory_mb)
+# and the memory limit (memory_max_mb).
+workerTypes:
+  - name: base
+    node_class: base
+    description: Standard CPU worker
+    per_job:
+      cores: 2
+      memory_mb: 4096
+      memory_max_mb: 8192
+  # - name: gpu
+  #   node_class: gpu
+  #   description: 1x GPU worker
+  #   per_job:
+  #     cores: 4
+  #     memory_mb: 16384
+  #     memory_max_mb: 32768
+  #     gpu: 1
+defaultWorkerType: base
+
+# Private index for installing Prodigy into custom environments. Use the
+# value Explosion provides; empty disables it.
+prodigyPypiIndexUrl: ""
+
+secrets:
+  infraSecretName: ellf-infra  # created by examples/create-infra-secret.sh
+  containerSaKey: FILL-IN      # from cluster-creds.json: container_sa_key
+  prodigyLicenseKey: FILL-IN   # from cluster-creds.json: prodigy_license_key
+  mediaSigningKey: FILL-IN     # any random string, 32+ chars; enables media serving
+  rolloutChecksum: ""          # change to force a restart after rotating ellf-infra
+
+mediaGc:
+  enabled: false               # enable after a manual dry run
+  schedule: "0 3 * * 0"
+  minAgeDays: 7
+
+networkPolicy: true
+
+# In-cluster log shipping. null disables; set lokiExternalUrl to use an
+# existing Loki instead of deploying one.
+logging: null
+
+# Evaluation only. Never for a shared cluster.
+postgresql:
+  enabled: false

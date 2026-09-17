@@ -1,0 +1,135 @@
+{{- if .Values.preview.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ellf.previewName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+    app: preview
+spec:
+  replicas: {{ .Values.preview.replicas }}
+  selector:
+    matchLabels:
+      {{- include "ellf.previewSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ellf.previewSelectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # The stock nginx image chowns its cache dirs to uid 101 at startup when it
+      # runs as root. Under readOnlyRootFilesystem + capabilities drop:[ALL] that
+      # chown is forbidden (no CAP_CHOWN), so nginx aborts with [emerg]
+      # chown("/var/cache/nginx/client_temp") Operation not permitted and the pod
+      # crashloops. Running as the unprivileged nginx uid 101 skips that root-only
+      # setup entirely (and the config already listens on 8080, a non-privileged
+      # port); fsGroup makes the emptyDir scratch volumes (cache/run/tmp/conf.d)
+      # group-writable by that uid so nginx can still write its temp + rendered
+      # config files.
+      securityContext:
+        {{- with .Values.podSecurityContext }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+      {{- with .Values.preview.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.preview.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: preview
+          # Image artifact is still published as `embed` (built from
+          # docker/Dockerfile.embed, tagged with the broker version). Renaming
+          # the registry artifact is deferred — it would require building the
+          # new tag before any chart deploy — so only the in-cluster identity
+          # (Deployment/Service/Ingress/values) was renamed to `preview`.
+          image: {{ printf "%s/embed:%s" (include "ellf.upstreamRegistry" .) (include "ellf.brokerVersion" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            # The nginx config template unconditionally references
+            # ${ELLF_MEDIA_SIGNING_KEY} (secure_link_md5). envsubst only
+            # substitutes *defined* env vars, and nginx treats a leftover
+            # ${...} as an unknown nginx variable and aborts at startup
+            # ([emerg]) — taking the whole embed pod down, and with it every
+            # annotation preview (media task or not, since they share this pod).
+            # So the var must ALWAYS be defined: the real key from the
+            # credentials secret when media is enabled, otherwise an explicit
+            # empty value for the embed-only stack.
+            - name: ELLF_MEDIA_SIGNING_KEY
+              {{- if .Values.secrets.mediaSigningKey }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ellf.credentialsSecretName" . }}
+                  key: ELLF_MEDIA_SIGNING_KEY
+              {{- else }}
+              value: ""
+              {{- end }}
+          volumeMounts:
+            # nginx needs writable scratch paths under a read-only root filesystem.
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+            # Rendered config target for the image's envsubst step (the root
+            # filesystem is read-only, so conf.d must be a writable volume).
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
+            {{- if .Values.secrets.mediaSigningKey }}
+            # Shared data volume holding the content-addressed media blobs.
+            - name: nfs
+              mountPath: /mnt/nfs
+              readOnly: true
+            {{- end }}
+          {{- with .Values.preview.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-conf
+          emptyDir: {}
+        {{- if .Values.secrets.mediaSigningKey }}
+        - name: nfs
+          persistentVolumeClaim:
+            claimName: {{ .Values.nfs.claimName }}
+        {{- end }}
+{{- end }}

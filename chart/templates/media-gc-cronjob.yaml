@@ -1,0 +1,75 @@
+{{- if and .Values.secrets.mediaSigningKey .Values.mediaGc.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-media-gc" (include "ellf.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+    app: media-gc
+spec:
+  schedule: {{ .Values.mediaGc.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "ellf.labels" . | nindent 12 }}
+            app: media-gc
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.broker.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.broker.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          serviceAccountName: {{ include "ellf.fullname" . }}
+          containers:
+            - name: media-gc
+              image: {{ printf "%s/broker:%s" (include "ellf.upstreamRegistry" .) (include "ellf.brokerVersion" .) }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command:
+                - python
+                - -m
+                - ellf_broker.media_gc
+                - --apply
+                - --min-age-days
+                - {{ .Values.mediaGc.minAgeDays | quote }}
+              envFrom:
+                - configMapRef:
+                    name: {{ include "ellf.envConfigMapName" . }}
+                - secretRef:
+                    name: {{ include "ellf.credentialsSecretName" . }}
+                - secretRef:
+                    name: {{ include "ellf.infraSecretName" . }}
+              volumeMounts:
+                - name: nfs
+                  mountPath: /mnt/nfs
+                - name: tmp
+                  mountPath: /tmp
+              {{- with .Values.containerSecurityContext.api }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+          volumes:
+            - name: nfs
+              persistentVolumeClaim:
+                claimName: {{ .Values.nfs.claimName }}
+            - name: tmp
+              emptyDir: {}
+{{- end }}

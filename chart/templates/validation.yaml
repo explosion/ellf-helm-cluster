@@ -1,0 +1,85 @@
+{{- if not (include "ellf.upstreamRegistry" .) }}
+{{- fail "values.registries.upstream (or the legacy values.image.registry) is required" }}
+{{- end }}
+{{- if not .Values.local }}
+  {{/* Versions resolve from values.image.*, falling back to the live
+       Deployment's tags (see ellf.brokerVersion). Neither source is
+       available on a fresh install or in `helm template` — then a pinned
+       tag must be passed explicitly (`ellf infra deploy` injects PAM's
+       target versions). */}}
+  {{- $brokerVersion := include "ellf.brokerVersion" . }}
+  {{- if or (not $brokerVersion) (eq $brokerVersion "latest") }}
+  {{- fail "image.brokerVersion could not be resolved to a pinned (non-latest) tag — no value set and no live deployment to read it from. Deploy with 'ellf infra deploy' (which injects the version PAM advertises) or set image.brokerVersion explicitly." }}
+  {{- end }}
+  {{- $cplVersion := include "ellf.cplVersion" . }}
+  {{- if or (not $cplVersion) (eq $cplVersion "latest") }}
+  {{- fail "image.cplVersion could not be resolved to a pinned (non-latest) tag — no value set and no live deployment to read it from. Deploy with 'ellf infra deploy' (which injects the version PAM advertises) or set image.cplVersion explicitly." }}
+  {{- end }}
+{{- end }}
+{{- if not .Values.cluster.clusterId }}
+{{- fail "values.cluster.clusterId is required" }}
+{{- end }}
+{{- if not .Values.cluster.fqdn }}
+{{- fail "values.cluster.fqdn is required" }}
+{{- end }}
+{{- if contains "://" .Values.cluster.fqdn }}
+{{- fail "values.cluster.fqdn must be a bare host[:port] without a scheme — set values.cluster.scheme instead" }}
+{{- end }}
+{{- if .Values.cluster.scheme }}
+  {{- if not (or (eq .Values.cluster.scheme "http") (eq .Values.cluster.scheme "https")) }}
+  {{- fail "values.cluster.scheme must be \"http\" or \"https\"" }}
+  {{- end }}
+{{- end }}
+{{- if not .Values.cluster.pamFqdn }}
+{{- fail "values.cluster.pamFqdn is required" }}
+{{- end }}
+{{- if not .Values.ingress.className }}
+{{- fail "values.ingress.className is required" }}
+{{- end }}
+{{- if and (not .Values.database.ip) (not .Values.postgresql.enabled) (not .Values.local) }}
+{{- fail "values.database.ip is required (or enable postgresql subchart)" }}
+{{- end }}
+{{- if not (or .Values.local .Values.postgresql.enabled) }}
+  {{- if not .Values.database.user }}
+  {{- fail "values.database.user is required" }}
+  {{- end }}
+  {{- if not .Values.database.name }}
+  {{- fail "values.database.name is required" }}
+  {{- end }}
+{{- end }}
+{{- if not .Values.nfs.claimName }}
+{{- fail "values.nfs.claimName is required" }}
+{{- end }}
+{{- if and (eq (toString .Values.storage.type) "hostPath") (not .Values.storage.hostPath) }}
+{{- fail "values.storage.hostPath is required when storage.type=hostPath" }}
+{{- end }}
+{{- if and .Values.certManager (not .Values.ingress.tls.secretName) }}
+{{- fail "values.ingress.tls.secretName is required when certManager is set" }}
+{{- end }}
+{{- if and .Values.certManager (not .Values.certManager.acmeEmail) }}
+{{- fail "values.certManager.acmeEmail is required when certManager is set" }}
+{{- end }}
+{{- $localTls := (get (.Values.local | default dict) "tls") | default dict }}
+{{- $localTlsCrt := (get $localTls "crt") | default "" }}
+{{- $localTlsKey := (get $localTls "key") | default "" }}
+{{- $hasLocalTlsCrt := not (empty $localTlsCrt) }}
+{{- $hasLocalTlsKey := not (empty $localTlsKey) }}
+{{- if and .Values.local (or $hasLocalTlsCrt $hasLocalTlsKey) (not .Values.ingress.tls.secretName) }}
+{{- fail "values.ingress.tls.secretName is required when local.tls.crt/key are set" }}
+{{- end }}
+{{- if and .Values.local (ne $hasLocalTlsCrt $hasLocalTlsKey) }}
+{{- fail "values.local.tls.crt and values.local.tls.key must both be set together" }}
+{{- end }}
+{{- if .Values.local }}
+  {{/* Local mode: inline secrets managed by this chart — no infraSecretName/containerSaKey required */}}
+{{- else if .Values.secrets.infraSecretName }}
+  {{/* Terraform infra secret + Helm credentials secret mode */}}
+  {{- if not .Values.secrets.containerSaKey }}
+  {{- fail "values.secrets.containerSaKey is required when using secrets.infraSecretName" }}
+  {{- end }}
+  {{- if not .Values.secrets.prodigyLicenseKey }}
+  {{- fail "values.secrets.prodigyLicenseKey is required when using secrets.infraSecretName" }}
+  {{- end }}
+{{- else }}
+{{- fail "secrets.infraSecretName must be set (or enable local mode)." }}
+{{- end }}

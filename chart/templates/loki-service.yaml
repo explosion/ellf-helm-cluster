@@ -1,0 +1,21 @@
+{{- if and .Values.logging .Values.logging.loki }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ellf.fullname" . }}-loki
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+    app: loki
+spec:
+  type: ClusterIP
+  selector:
+    app: loki
+    app.kubernetes.io/name: {{ include "ellf.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: 3100
+      targetPort: http
+      protocol: TCP
+      name: http
+{{- end }}

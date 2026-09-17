@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "ellf.fullname" . }}-test-nfs-mount
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+    app: test-nfs-mount
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  {{- with .Values.broker.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.broker.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: nfs-check
+      image: busybox:1.36
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          CANARY="/mnt/nfs/.preflight-canary-$$"
+          echo "preflight-ok" > "$CANARY"
+          CONTENT=$(cat "$CANARY")
+          rm -f "$CANARY"
+          [ "$CONTENT" = "preflight-ok" ]
+          echo "NFS read/write check passed"
+      volumeMounts:
+        - name: nfs
+          mountPath: /mnt/nfs
+  volumes:
+    - name: nfs
+      persistentVolumeClaim:
+        claimName: {{ .Values.nfs.claimName }}

@@ -1,0 +1,192 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ellf.brokerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+    app: broker
+spec:
+  replicas: {{ .Values.broker.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ellf.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ellf.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/app-secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- with .Values.secrets.rolloutChecksum }}
+        checksum/infra-secret: {{ . | quote }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "ellf.fullname" . }}
+      {{- if ne .Values.automountServiceAccountToken nil }}
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.broker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.broker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.local }}
+      {{- with .Values.local.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      containers:
+        - name: api
+          image: {{ printf "%s/broker:%s" (include "ellf.upstreamRegistry" .) (include "ellf.brokerVersion" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - python
+            - -m
+            - uvicorn
+            - ellf_broker.serve:app
+            - --host
+            - "0.0.0.0"
+            - --log-level
+            - info
+            - --port
+            - "8080"
+            {{- if and .Values.local .Values.local.reload }}
+            - --reload
+            {{- end }}
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: {{ include "ellf.envConfigMapName" . }}
+            - secretRef:
+                name: {{ include "ellf.credentialsSecretName" . }}
+            - secretRef:
+                name: {{ include "ellf.infraSecretName" . }}
+          env:
+            - name: PORT
+              value: "8080"
+            - name: ELLF_VERSION_CONTAINER_SHA
+              value: {{ include "ellf.brokerVersion" . | quote }}
+            - name: ELLF_VERSION_CPL_PACKAGE
+              value: {{ include "ellf.cplVersion" . | quote }}
+            # Ad-hoc image assembly runs as a one-shot job in the broker's
+            # own image (ellf_broker.build_worker), so it gets its own
+            # memory limit instead of competing with this container's.
+            - name: ELLF_BUILDER_IMAGE
+              value: {{ printf "%s/broker:%s" (include "ellf.upstreamRegistry" .) (include "ellf.brokerVersion" .) | quote }}
+          volumeMounts:
+            - name: nfs
+              mountPath: /mnt/nfs
+            - name: config-files
+              mountPath: /local/broker-config.yml
+              subPath: broker-config.yml
+            - name: tmp
+              mountPath: /tmp
+            {{- if and .Values.local .Values.local.devMounts }}
+            - name: broker-src
+              mountPath: /app
+            {{- end }}
+          {{- with .Values.broker.resources.api }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.containerSecurityContext.api }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.broker.readinessProbe }}
+          readinessProbe:
+            httpGet:
+              path: /api/v1/status
+              port: 8080
+            initialDelaySeconds: {{ .initialDelaySeconds }}
+            periodSeconds: {{ .periodSeconds }}
+            timeoutSeconds: {{ .timeoutSeconds }}
+          {{- end }}
+          {{- with .Values.broker.livenessProbe }}
+          livenessProbe:
+            httpGet:
+              path: /api/v1/status
+              port: 8080
+            initialDelaySeconds: {{ .initialDelaySeconds }}
+            periodSeconds: {{ .periodSeconds }}
+            timeoutSeconds: {{ .timeoutSeconds }}
+          {{- end }}
+        - name: cpl
+          image: {{ printf "%s/cpl:%s" (include "ellf.upstreamRegistry" .) (include "ellf.cplVersion" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "ellf.envConfigMapName" . }}
+            - secretRef:
+                name: {{ include "ellf.credentialsSecretName" . }}
+            - secretRef:
+                name: {{ include "ellf.infraSecretName" . }}
+          env:
+            - name: ELLF_UPSTREAM_REGISTRY
+              value: {{ include "ellf.upstreamRegistry" . | quote }}
+            # Legacy aliases, still read by pre-rename images. Remove once all
+            # clusters run images that read ELLF_UPSTREAM_REGISTRY.
+            - name: ELLF_RELEASE_REGISTRY
+              value: {{ include "ellf.upstreamRegistry" . | quote }}
+            - name: ELLF_CONTAINER_REGISTRY
+              value: {{ include "ellf.upstreamRegistry" . | quote }}
+          volumeMounts:
+            - name: config-files
+              mountPath: /local/cpl-config.yml
+              subPath: cpl-config.yml
+            - name: tmp
+              mountPath: /tmp
+            {{- if and .Values.local .Values.local.devMounts }}
+            - name: cpl-src
+              mountPath: /app
+            {{- end }}
+          {{- with .Values.broker.resources.cpl }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.containerSecurityContext.cpl }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.broker.cplReadinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.broker.cplLivenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: nfs
+          persistentVolumeClaim:
+            claimName: {{ .Values.nfs.claimName }}
+        - name: config-files
+          configMap:
+            name: {{ include "ellf.configFilesConfigMapName" . }}
+        - name: tmp
+          emptyDir: {}
+        {{- if and .Values.local .Values.local.devMounts }}
+        - name: broker-src
+          hostPath:
+            path: {{ .Values.local.devMounts.brokerSrcHostPath }}
+        - name: cpl-src
+          hostPath:
+            path: {{ .Values.local.devMounts.cplSrcHostPath }}
+        {{- end }}

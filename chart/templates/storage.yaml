@@ -1,0 +1,41 @@
+{{- if or .Values.local (eq (toString .Values.storage.type) "hostPath") }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.nfs.claimName }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+spec:
+  capacity:
+    {{- if .Values.local }}
+    storage: {{ .Values.local.storage.capacity }}
+    {{- else }}
+    storage: {{ .Values.storage.capacity }}
+    {{- end }}
+  accessModes: [ReadWriteMany]
+  hostPath:
+    {{- if .Values.local }}
+    path: {{ .Values.local.storage.hostPath }}
+    {{- else }}
+    path: {{ .Values.storage.hostPath }}
+    {{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.nfs.claimName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+spec:
+  storageClassName: ""
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      {{- if .Values.local }}
+      storage: {{ .Values.local.storage.capacity }}
+      {{- else }}
+      storage: {{ .Values.storage.capacity }}
+      {{- end }}
+  volumeName: {{ .Values.nfs.claimName }}
+{{- end }}

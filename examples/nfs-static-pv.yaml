@@ -1,0 +1,45 @@
+# A static ReadWriteMany PersistentVolume backed by a plain NFS export, bound
+# to the `prodigy-nfs` claim the chart expects. Equivalent to what
+# Explosion's Terraform creates for Filestore, EFS and Azure Files.
+#
+# Replace the server and path, then:
+#   kubectl apply -f examples/nfs-static-pv.yaml
+#
+# With a CSI driver that supports RWX (EFS CSI, Azure Files, CephFS, ...),
+# create the PVC against its StorageClass instead and drop the PV.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ellf-nfs
+provisioner: kubernetes.io/no-provisioner
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prodigy-nfs-pv
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ellf-nfs
+  mountOptions:
+    - nfsvers=4.1
+  nfs:
+    server: 10.20.40.5          # FILL-IN: NFS server address
+    path: /exports/ellf         # FILL-IN: export path; must allow root writes
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prodigy-nfs
+  namespace: ellf
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ellf-nfs
+  volumeName: prodigy-nfs-pv
+  resources:
+    requests:
+      storage: 1Ti

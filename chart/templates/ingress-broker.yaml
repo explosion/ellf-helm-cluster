@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ellf.brokerName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- $ingressTlsSecretName := include "ellf.ingressTlsSecretName" . }}
+spec:
+  ingressClassName: {{ include "ellf.ingressClassName" . }}
+  {{- if $ingressTlsSecretName }}
+  tls:
+    - hosts:
+        - {{ include "ellf.brokerHostname" . | quote }}
+      secretName: {{ $ingressTlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ include "ellf.brokerHostname" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ellf.brokerName" . }}
+                port:
+                  number: 8080

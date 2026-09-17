@@ -1,0 +1,50 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "ellf.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+rules:
+  # Broker creates configmaps to store environment requirements
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list", "patch"]
+  # Broker manages K8s secrets for user-facing secret storage
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "patch", "delete"]
+  # Broker watches pods for job status and reads logs
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Broker creates services for annotation sessions; CPL watches them
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  # Broker creates deployments for annotation sessions; CPL watches them
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  # Broker creates jobs for environment builds; CPL watches them
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  # The chart owns the media-gc CronJob, but CPL re-tags it to the current
+  # broker version on every settings event (_patch_broker_trackers), so it
+  # needs to find it by label and patch it -- but never to create or delete.
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch", "patch"]
+  # Broker creates Ingresses for annotation session routing.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  # Broker creates the Traefik ForwardAuth Middleware CR that gates
+  # service-recipe Ingresses behind platform auth.
+  - apiGroups: ["traefik.io"]
+    resources: ["middlewares"]
+    verbs: ["create", "get", "list", "patch"]

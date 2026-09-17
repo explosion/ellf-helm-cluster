@@ -1,0 +1,60 @@
+{{- if and .Values.logging .Values.logging.vector }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ellf.fullname" . }}-vector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+    app: vector
+data:
+  vector.yaml: |
+    sources:
+      kubernetes_logs:
+        type: kubernetes_logs
+        namespace_annotation_fields:
+          namespace_labels: ""
+        node_annotation_fields:
+          node_labels: ""
+        extra_label_selector: "app.kubernetes.io/managed-by=ellf-broker"
+        extra_namespace_label_selector: "kubernetes.io/metadata.name={{ .Release.Namespace }}"
+
+    transforms:
+      enrich:
+        type: remap
+        inputs: ["kubernetes_logs"]
+        source: |
+          .job_id = get(value: .kubernetes.pod_labels, path: ["ellf/job-id"]) ?? ""
+          .execution_id = get(value: .kubernetes.pod_labels, path: ["ellf/execution-id"]) ?? ""
+          .job_type = get(value: .kubernetes.pod_labels, path: ["ellf/job-type"]) ?? ""
+          .managed_by = get(value: .kubernetes.pod_labels, path: ["app.kubernetes.io/managed-by"]) ?? ""
+
+      filter_jobs:
+        type: filter
+        inputs: ["enrich"]
+        condition:
+          type: vrl
+          source: '.job_id != ""'
+
+    sinks:
+      loki:
+        type: loki
+        inputs: ["filter_jobs"]
+        endpoint: {{ if .Values.logging.lokiExternalUrl }}{{ .Values.logging.lokiExternalUrl }}{{ else }}http://{{ include "ellf.fullname" . }}-loki.{{ .Release.Namespace }}:3100{{ end }}
+        encoding:
+          codec: text
+        labels:
+          namespace: '{{ "{{ kubernetes.pod_namespace }}" }}'
+          pod: '{{ "{{ kubernetes.pod_name }}" }}'
+          container: '{{ "{{ kubernetes.container_name }}" }}'
+          job_id: '{{ "{{ job_id }}" }}'
+          execution_id: '{{ "{{ execution_id }}" }}'
+          job_type: '{{ "{{ job_type }}" }}'
+          managed_by: '{{ "{{ managed_by }}" }}'
+        out_of_order_action: accept
+        buffer:
+          type: disk
+          max_size: 268435456  # 256MB
+        batch:
+          timeout_secs: 1
+{{- end }}

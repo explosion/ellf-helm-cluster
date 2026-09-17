@@ -1,0 +1,33 @@
+# Traefik values matching what Explosion's tooling installs.
+#
+#   helm repo add traefik https://traefik.github.io/charts
+#   helm upgrade --install traefik traefik/traefik -n traefik \
+#     --create-namespace -f examples/traefik-values.yaml
+#
+# Ellf needs the Kubernetes Ingress provider, the Traefik CRDs (installed by
+# the chart) and entry points on 80 and 443. The tolerations let Traefik run
+# on the tainted system node pool.
+providers:
+  kubernetesIngress:
+    enabled: true
+ingressRoute:
+  dashboard:
+    enabled: false
+ports:
+  web:
+    port: 80
+  websecure:
+    port: 443
+securityContext:
+  capabilities:
+    drop: []
+    add: [NET_BIND_SERVICE]
+tolerations:
+  - key: ellf/role
+    operator: Equal
+    value: system
+    effect: NoSchedule
+# Pin a pre-allocated address if your cloud supports it:
+# service:
+#   spec:
+#     loadBalancerIP: 203.0.113.10

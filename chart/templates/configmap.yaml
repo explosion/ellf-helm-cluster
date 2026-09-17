@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ellf.envConfigMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+data:
+  ELLF_BROKER_ID: {{ .Values.cluster.clusterId | quote }}
+  ELLF_BROKER_HOST: {{ printf "%s://%s" (include "ellf.clusterScheme" .) .Values.cluster.fqdn | quote }}
+  # In-cluster Service URL for server-to-server traffic (OIDC token/userinfo
+  # exchange, workload bootstrap). Keeps Prodigy → broker hops inside the
+  # cluster rather than hairpinning out via cluster.fqdn. See
+  # docs/auth-architecture.md "Server-to-server traffic stays in-cluster."
+  ELLF_BROKER_INTERNAL_HOST: {{ printf "http://%s.%s:8080" (include "ellf.brokerName" .) .Release.Namespace | quote }}
+  ELLF_PAM_URL: {{ printf "https://%s" .Values.cluster.pamFqdn | quote }}
+  ELLF_APP_URL: {{ printf "https://%s" .Values.cluster.pamFqdn | quote }}
+  {{- if .Values.postgresql.enabled }}  {{/* subchart — keep .enabled */}}
+  ELLF_DATABASE_IP: {{ printf "%s-postgresql" (include "ellf.fullname" .) | quote }}
+  {{- else }}
+  ELLF_DATABASE_IP: {{ .Values.database.ip | quote }}
+  {{- end }}
+  {{- if and .Values.postgresql.enabled (not .Values.database.user) }}
+  ELLF_DATABASE_USER: {{ .Values.postgresql.auth.username | quote }}
+  {{- else }}
+  ELLF_DATABASE_USER: {{ .Values.database.user | quote }}
+  {{- end }}
+  {{- if and .Values.postgresql.enabled (not .Values.database.name) }}
+  ELLF_DATABASE_NAME: {{ .Values.postgresql.auth.database | quote }}
+  {{- else }}
+  ELLF_DATABASE_NAME: {{ .Values.database.name | quote }}
+  {{- end }}
+  ELLF_CORS_ORIGINS: {{ printf "%s://%s,https://%s" (include "ellf.clusterScheme" .) .Values.cluster.fqdn .Values.cluster.pamFqdn | quote }}
+  {{- if and .Values.gcp .Values.gcp.project }}
+  ELLF_GCP_PROJECT: {{ .Values.gcp.project | quote }}
+  ELLF_GCP_ZONE: {{ .Values.gcp.zone | quote }}
+  {{- end }}
+  ELLF_WORKER_TYPES: {{ .Values.workerTypes | toJson | quote }}
+  ELLF_DEFAULT_WORKER_TYPE: {{ .Values.defaultWorkerType | default "" | quote }}
+  {{- if .Values.prodigyPypiIndexUrl }}
+  ELLF_PRODIGY_PYPI_INDEX_URL: {{ .Values.prodigyPypiIndexUrl | quote }}
+  {{- end }}
+  {{- if .Values.costViewTable }}
+  # CPL cloud-cost collector: BigQuery authorized view over the billing
+  # export. ELLF_GCP_PROJECT (above, gated on gcp.project) is the second
+  # precondition; the runtime switch is PAM's cost_collection_enabled.
+  ELLF_COST_VIEW_TABLE: {{ .Values.costViewTable | quote }}
+  {{- end }}
+  ELLF_INGRESS_CLASS_NAME: {{ include "ellf.ingressClassName" . | quote }}
+  {{- $ingressTlsSecretName := include "ellf.ingressTlsSecretName" . }}
+  {{- if $ingressTlsSecretName }}
+  ELLF_INGRESS_TLS_SECRET_NAME: {{ $ingressTlsSecretName | quote }}
+  {{- end }}
+  ELLF_K8S_NAMESPACE: {{ .Release.Namespace | quote }}
+  ELLF_NFS_PVC_NAME: {{ .Values.nfs.claimName | quote }}
+  {{- $upstreamRegistry := include "ellf.upstreamRegistry" . }}
+  {{- $ownRegistry := include "ellf.userRegistry" . }}
+  ELLF_UPSTREAM_REGISTRY: {{ $upstreamRegistry | quote }}
+  # Legacy aliases, still read by pre-rename broker/cpl images. Remove once
+  # all clusters run images that read ELLF_UPSTREAM_REGISTRY.
+  ELLF_RELEASE_REGISTRY: {{ $upstreamRegistry | quote }}
+  ELLF_CONTAINER_REGISTRY: {{ $upstreamRegistry | quote }}
+  {{- $trustedRegistries := list $upstreamRegistry }}
+  {{- if $ownRegistry }}
+  {{- $trustedRegistries = append $trustedRegistries $ownRegistry }}
+  ELLF_USER_REGISTRY: {{ $ownRegistry | quote }}
+  # Legacy aliases, remove alongside ELLF_RELEASE_REGISTRY.
+  ELLF_CLUSTER_REGISTRY: {{ $ownRegistry | quote }}
+  ELLF_CLUSTER_CONTAINER_REGISTRY: {{ $ownRegistry | quote }}
+  {{- end }}
+  ELLF_TRUSTED_REGISTRIES: {{ join "," (uniq $trustedRegistries) | quote }}
+  ELLF_STREAM_TRACEBACKS: {{ .Values.cluster.streamTracebacks | default false | quote }}
+  {{- if .Values.development }}
+  ELLF_DEVELOPMENT_MODE: "true"
+  ELLF_VERBOSE: {{ .Values.development.verbose | quote }}
+  ELLF_JSON_LOGS: {{ .Values.development.jsonLogs | quote }}
+  {{- else }}
+  ELLF_DEVELOPMENT_MODE: "false"
+  ELLF_VERBOSE: "false"
+  ELLF_JSON_LOGS: "true"
+  {{- end }}
+  {{- if and .Values.logging .Values.logging.loki }}
+  ELLF_LOKI_URL: {{ printf "http://%s-loki.%s:3100" (include "ellf.fullname" .) .Release.Namespace | quote }}
+  {{- else if and .Values.logging .Values.logging.lokiExternalUrl }}
+  ELLF_LOKI_URL: {{ .Values.logging.lokiExternalUrl | quote }}
+  {{- end }}
+  {{- if .Values.local }}
+  ELLF_AUTH_JWKS_URL: "http://pam:8000/api/v1/.well-known/jwks.json"
+  {{- with .Values.local.hostAliases }}
+  ELLF_POD_HOST_ALIASES: {{ toJson . | quote }}
+  {{- end }}
+  {{- with .Values.local.devMounts }}
+  ELLF_POD_PRODIGY_SRC_HOST_PATH: {{ .prodigySrcHostPath | quote }}
+  ELLF_POD_RECIPES_SRC_HOST_PATH: {{ .recipesSrcHostPath | quote }}
+  ELLF_POD_PAM_SDK_SRC_HOST_PATH: {{ .pamSdkSrcHostPath | quote }}
+  ELLF_POD_RECIPES_SDK_SRC_HOST_PATH: {{ .recipesSdkSrcHostPath | quote }}
+  {{- end }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ellf.configFilesConfigMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+data:
+  broker-config.yml: |-
+{{- .Values.configFiles.brokerConfig | trim | nindent 4 }}
+  cpl-config.yml: |-
+{{- .Values.configFiles.cplConfig | trim | nindent 4 }}

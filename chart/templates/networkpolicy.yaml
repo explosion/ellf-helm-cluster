@@ -1,0 +1,73 @@
+{{- if .Values.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ellf.brokerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ellf.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # DNS — required for all name resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL
+    - ports:
+        - protocol: TCP
+          port: 5432
+      {{- if .Values.postgresql.enabled }}  {{/* subchart condition — keep .enabled */}}
+      to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      {{- else if .Values.database.egressCidr }}
+      {{- /* Preferred: an explicit CIDR. On AWS database.ip is an RDS
+            hostname (never a stable IP), so the terraform emits the DB
+            network's CIDR separately for this rule. */}}
+      to:
+        - ipBlock:
+            cidr: {{ .Values.database.egressCidr }}
+      {{- else if .Values.database.ip }}
+      to:
+        - ipBlock:
+            cidr: {{ .Values.database.ip }}/32
+      {{- end }}
+    # HTTPS — K8s API, PAM, GCP APIs, PyPI indices
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+    # Task pods — the broker probes /tasks/<id>/login in-cluster before
+    # issuing a login token (see _wait_for_task_login_route).
+    - ports:
+        - protocol: TCP
+          port: 80
+      to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: ellf-broker
+    {{- if .Values.logging }}
+    # Loki — in-namespace log shipping
+    - ports:
+        - protocol: TCP
+          port: 3100
+      to:
+        - podSelector:
+            matchLabels:
+              app: loki
+    {{- end }}
+{{- end }}

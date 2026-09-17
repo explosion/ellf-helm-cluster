@@ -1,0 +1,41 @@
+{{- if .Values.preview.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ellf.previewName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- $ingressTlsSecretName := include "ellf.ingressTlsSecretName" . }}
+spec:
+  ingressClassName: {{ include "ellf.ingressClassName" . }}
+  {{- if $ingressTlsSecretName }}
+  tls:
+    - hosts:
+        - {{ include "ellf.brokerHostname" . | quote }}
+      secretName: {{ $ingressTlsSecretName }}
+  {{- end }}
+  rules:
+    # Same host as the broker ingress; Traefik routes by longest-path priority,
+    # so `/embed` wins over the broker's `/` catch-all.
+    - host: {{ include "ellf.brokerHostname" . | quote }}
+      http:
+        paths:
+          - path: /embed
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ellf.previewName" . }}
+                port:
+                  number: 8080
+          {{- if .Values.secrets.mediaSigningKey }}
+          # Recipe media, served by the same nginx pod from the shared volume
+          # behind a secure_link token. Longer path than the broker's `/`, so
+          # Traefik routes it here.
+          - path: /media
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ellf.previewName" . }}
+                port:
+                  number: 8080
+          {{- end }}
+{{- end }}

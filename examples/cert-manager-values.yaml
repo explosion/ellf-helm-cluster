@@ -1,0 +1,21 @@
+# cert-manager values matching what Explosion's tooling installs. Only
+# needed when using Let's Encrypt (values key `certManager`); skip it if you
+# bring your own certificate.
+#
+#   helm repo add jetstack https://charts.jetstack.io
+#   helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager \
+#     --create-namespace -f examples/cert-manager-values.yaml
+crds:
+  enabled: true
+  keep: true
+tolerations: &systemTolerations
+  - key: ellf/role
+    operator: Equal
+    value: system
+    effect: NoSchedule
+webhook:
+  tolerations: *systemTolerations
+cainjector:
+  tolerations: *systemTolerations
+startupapicheck:
+  tolerations: *systemTolerations

@@ -1,0 +1,29 @@
+{{- if and .Values.logging .Values.logging.vector }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ellf.fullname" . }}-vector
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+    app: vector
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ellf.fullname" . }}-vector
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+    app: vector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ellf.fullname" . }}-vector
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ellf.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

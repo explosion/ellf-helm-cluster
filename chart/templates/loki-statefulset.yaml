@@ -1,0 +1,69 @@
+{{- if and .Values.logging .Values.logging.loki }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "ellf.fullname" . }}-loki
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" . | nindent 4 }}
+    app: loki
+spec:
+  replicas: 1
+  serviceName: {{ include "ellf.fullname" . }}-loki
+  selector:
+    matchLabels:
+      app: loki
+      app.kubernetes.io/name: {{ include "ellf.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: loki
+        app.kubernetes.io/name: {{ include "ellf.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/loki-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "ellf.fullname" . }}
+      {{- with .Values.logging.loki.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: loki
+          image: {{ .Values.logging.loki.image }}
+          args:
+            - -config.file=/etc/loki/loki.yaml
+          ports:
+            - containerPort: 3100
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+            - name: storage
+              mountPath: /loki
+              subPath: {{ .Values.logging.loki.storage.nfsSubPath }}
+          {{- with .Values.logging.loki.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3100
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 3100
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "ellf.fullname" . }}-loki
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ .Values.nfs.claimName }}
+{{- end }}

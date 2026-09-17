@@ -1,0 +1,7 @@
+# Never commit filled-in credentials or keys
+cluster-creds.json
+values.yaml
+*.pem
+*.key
+*.tgz
+!chart/charts/*.tgz

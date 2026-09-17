@@ -1,0 +1,29 @@
+{{- if .Values.local }}
+{{- range .Values.local.bridge.services }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" $ | nindent 4 }}
+spec:
+  ports:
+    - port: {{ .port }}
+      targetPort: {{ .port }}
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ellf.labels" $ | nindent 4 }}
+subsets:
+  - addresses:
+      - ip: {{ .ip | quote }}
+    ports:
+      - port: {{ .port }}
+---
+{{- end }}
+{{- end }}
